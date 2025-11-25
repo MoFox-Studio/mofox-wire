@@ -1,0 +1,12 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include setup.py
+recursive-include mofox_bus *.py
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+exclude .gitignore
+exclude .pytest_cache
+exclude .mypy_cache
+exclude .coverage
+exclude *.egg-info

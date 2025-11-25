@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling>=1.18", "editables>=0.5"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mofox-bus"
+version = "0.1.0"
+description = "Messaging bus for MoFox Bot with HTTP/WebSocket transports and routing helpers."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "MoFox Team" }]
+dependencies = [
+    "aiohttp>=3.12.0",
+    "fastapi>=0.116.0",
+    "orjson>=3.10.0",
+    "uvicorn>=0.35.0",
+    "websockets>=15.0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/mofox-bot/mofox-bus"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mofox_bus"]
