@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import multiprocessing as mp
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable, Literal, Protocol
 from urllib.parse import urlparse
@@ -384,6 +385,16 @@ class InProcessCoreSink(CoreSink):
     def __init__(self, handler: Callable[[MessageEnvelope], Awaitable[None]]):
         self._handler = handler
         self._outgoing_handlers: set[OutgoingHandler] = set()
+        self._tasks: set[asyncio.Task] = set()
+
+    def _track_task(self, task: asyncio.Task, *, label: str) -> None:
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(
+            lambda t: logger.exception(f"{label} task failed", exc_info=t.exception())
+            if t.exception()
+            else None
+        )
 
     def set_outgoing_handler(self, handler: OutgoingHandler | None) -> None:
         if handler is None:
@@ -394,20 +405,28 @@ class InProcessCoreSink(CoreSink):
         self._outgoing_handlers.discard(handler)
 
     async def send(self, message: MessageEnvelope) -> None:
-        await self._handler(message)
+        task = asyncio.create_task(self._handler(message))
+        self._track_task(task, label="incoming")
 
     async def send_many(self, messages: list[MessageEnvelope]) -> None:
         for message in messages:
-            await self._handler(message)
+            task = asyncio.create_task(self._handler(message))
+            self._track_task(task, label="incoming-batch")
 
     async def push_outgoing(self, envelope: MessageEnvelope) -> None:
         if not self._outgoing_handlers:
             logger.debug("Outgoing envelope dropped: no handler registered")
             return
         for callback in list(self._outgoing_handlers):
-            await callback(envelope)
+            task = asyncio.create_task(callback(envelope))
+            self._track_task(task, label="outgoing")
 
     async def close(self) -> None:  # pragma: no cover - symmetry
+        for task in list(self._tasks):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._tasks.clear()
         self._outgoing_handlers.clear()
 
 
@@ -425,6 +444,25 @@ class ProcessCoreSink(CoreSink):
         self._closed = False
         self._listener_task: asyncio.Task | None = None
         self._loop = asyncio.get_event_loop()
+        self._handler_tasks: set[asyncio.Task] = set()
+        # Dedicated executors: one for long-running queue.get, one for puts
+        self._listener_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="process-core-sink-listener",
+        )
+        self._io_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="process-core-sink-io",
+        )
+
+    def _track_task(self, task: asyncio.Task, *, label: str) -> None:
+        self._handler_tasks.add(task)
+        task.add_done_callback(self._handler_tasks.discard)
+        task.add_done_callback(
+            lambda t: logger.exception(f"{label} task failed", exc_info=t.exception())
+            if t.exception()
+            else None
+        )
 
     def set_outgoing_handler(self, handler: OutgoingHandler | None) -> None:
         self._outgoing_handler = handler
@@ -438,7 +476,9 @@ class ProcessCoreSink(CoreSink):
                 self._listener_task.cancel()
 
     async def send(self, message: MessageEnvelope) -> None:
-        await asyncio.to_thread(self._to_core_queue.put, {"kind": "incoming", "payload": message})
+        await self._loop.run_in_executor(
+            self._io_executor, self._to_core_queue.put, {"kind": "incoming", "payload": message}
+        )
 
     async def send_many(self, messages: list[MessageEnvelope]) -> None:
         for message in messages:
@@ -451,17 +491,24 @@ class ProcessCoreSink(CoreSink):
         if self._closed:
             return
         self._closed = True
-        await asyncio.to_thread(self._from_core_queue.put, self._CONTROL_STOP)
+        await self._loop.run_in_executor(self._io_executor, self._from_core_queue.put, self._CONTROL_STOP)
         if self._listener_task:
             self._listener_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._listener_task
             self._listener_task = None
+        for task in list(self._handler_tasks):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._handler_tasks.clear()
+        self._listener_executor.shutdown(wait=False, cancel_futures=True)
+        self._io_executor.shutdown(wait=False, cancel_futures=True)
 
     async def _listen_from_core(self) -> None:
         while not self._closed:
             try:
-                item = await asyncio.to_thread(self._from_core_queue.get)
+                item = await self._loop.run_in_executor(self._listener_executor, self._from_core_queue.get)
             except asyncio.CancelledError:
                 break
             if item == self._CONTROL_STOP:
@@ -469,14 +516,10 @@ class ProcessCoreSink(CoreSink):
             if isinstance(item, dict) and item.get("kind") == "outgoing":
                 envelope = item.get("payload")
                 if self._outgoing_handler:
-                    try:
-                        await self._outgoing_handler(envelope)
-                    except Exception:  # pragma: no cover
-                        logger.exception("处理 ProcessCoreSink 中的 outgoing 信封失败")
+                    task = asyncio.create_task(self._outgoing_handler(envelope))
+                    self._track_task(task, label="process-core-outgoing")
             else:
-                logger.debug(f"ProcessCoreSink 接受到未知负载: {item}")
-
-
+                logger.debug(f"ProcessCoreSink ���ܵ�δ֪����: {item}")
 class ProcessCoreSinkServer:
     """
     进程间核心消息 sink 服务器，实现 CoreSink 协议，使用 multiprocessing.Queue 初始化。
@@ -498,6 +541,26 @@ class ProcessCoreSinkServer:
         self._task: asyncio.Task | None = None
         self._closed = False
         self._name = name or "adapter"
+        self._loop = asyncio.get_event_loop()
+        self._handler_tasks: set[asyncio.Task] = set()
+        # Separate executors: incoming get should not block outgoing puts
+        self._incoming_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix=f"core-sink-server-{self._name}-incoming",
+        )
+        self._outgoing_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix=f"core-sink-server-{self._name}-outgoing",
+        )
+
+    def _track_task(self, task: asyncio.Task, *, label: str) -> None:
+        self._handler_tasks.add(task)
+        task.add_done_callback(self._handler_tasks.discard)
+        task.add_done_callback(
+            lambda t: logger.exception(f"{label} task failed", exc_info=t.exception())
+            if t.exception()
+            else None
+        )
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -506,34 +569,44 @@ class ProcessCoreSinkServer:
     async def _consume_incoming(self) -> None:
         while not self._closed:
             try:
-                item = await asyncio.to_thread(self._incoming_queue.get)
+                item = await self._loop.run_in_executor(self._incoming_executor, self._incoming_queue.get)
             except asyncio.CancelledError:
                 break
             if isinstance(item, dict) and item.get("__core_sink_control__") == "stop":
                 break
             if isinstance(item, dict) and item.get("kind") == "incoming":
                 envelope = item.get("payload")
-                try:
-                    await self._core_handler(envelope)
-                except Exception:  # pragma: no cover
-                    logger.exception(f"处理来自 {self._name} 的 incoming 信封时失败")
+                task = asyncio.create_task(self._core_handler(envelope))
+                self._track_task(task, label=f"{self._name}-incoming")
             else:
-                logger.debug(f"ProcessCoreSinkServer 忽略来自 {self._name} 的未知负载: {item}")
-
+                logger.debug(f"ProcessCoreSinkServer �������� {self._name} ��δ֪����: {item}")
     async def push_outgoing(self, envelope: MessageEnvelope) -> None:
-        await asyncio.to_thread(self._outgoing_queue.put, {"kind": "outgoing", "payload": envelope})
+        await self._loop.run_in_executor(
+            self._outgoing_executor, self._outgoing_queue.put, {"kind": "outgoing", "payload": envelope}
+        )
 
     async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        await asyncio.to_thread(self._incoming_queue.put, {"__core_sink_control__": "stop"})
-        await asyncio.to_thread(self._outgoing_queue.put, ProcessCoreSink._CONTROL_STOP)
+        await self._loop.run_in_executor(
+            self._incoming_executor, self._incoming_queue.put, {"__core_sink_control__": "stop"}
+        )
+        await self._loop.run_in_executor(
+            self._outgoing_executor, self._outgoing_queue.put, ProcessCoreSink._CONTROL_STOP
+        )
         if self._task:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
+        for task in list(self._handler_tasks):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._handler_tasks.clear()
+        self._incoming_executor.shutdown(wait=False, cancel_futures=True)
+        self._outgoing_executor.shutdown(wait=False, cancel_futures=True)
 
 async def _send_many(sink: CoreMessageSink, envelopes: list[MessageEnvelope]) -> None:
     send_many = getattr(sink, "send_many", None)
