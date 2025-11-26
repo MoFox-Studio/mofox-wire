@@ -58,6 +58,8 @@ class WebSocketAdapterOptions:
     headers: dict[str, str] | None = None
     incoming_parser: Callable[[str | bytes], Any] | None = None
     outgoing_encoder: Callable[[MessageEnvelope], str | bytes] | None = None
+    reconnect_interval: float = 5.0  # 重连间隔（秒）
+    max_reconnect_attempts: int | None = None  # 最大重连次数，None 表示无限重连
 
 
 @dataclass
@@ -91,9 +93,13 @@ class AdapterBase:
         self._ws_task: asyncio.Task | None = None
         self._http_runner: aiohttp_web.AppRunner | None = None
         self._http_site: aiohttp_web.BaseSite | None = None
+        self._closed = False  # 标记适配器是否已关闭
+        self._reconnect_attempts = 0  # 当前重连尝试次数
 
     async def start(self) -> None:
         """启动适配器的传输层监听（如果配置了传输选项）。"""
+        self._closed = False
+        self._reconnect_attempts = 0
         if hasattr(self.core_sink, "set_outgoing_handler"):
             try:
                 self.core_sink.set_outgoing_handler(self._on_outgoing_from_core)
@@ -107,6 +113,7 @@ class AdapterBase:
 
     async def stop(self) -> None:
         """停止适配器的传输层监听（如果配置了传输选项）。"""
+        self._closed = True  # 标记为已关闭，阻止重连
         remove = getattr(self.core_sink, "remove_outgoing_handler", None)
         if callable(remove):
             try:
@@ -124,7 +131,10 @@ class AdapterBase:
                 await self._ws_task
             self._ws_task = None
         if self._ws:
-            await self._ws.close()
+            try:
+                await self._ws.close()
+            except Exception:
+                pass  # 忽略关闭时的错误
             self._ws = None
         if self._http_site:
             await self._http_site.stop()
@@ -132,6 +142,36 @@ class AdapterBase:
         if self._http_runner:
             await self._http_runner.cleanup()
             self._http_runner = None
+
+    def is_connected(self) -> bool:
+        """检查 WebSocket 是否已连接。"""
+        if isinstance(self._transport_config, WebSocketAdapterOptions):
+            return self._ws is not None and not self._ws.closed
+        elif isinstance(self._transport_config, HttpAdapterOptions):
+            return self._http_site is not None
+        return False
+
+    async def wait_connected(self, timeout: float = 10.0) -> bool:
+        """
+        等待 WebSocket 连接建立。
+        
+        Args:
+            timeout: 超时时间（秒）
+            
+        Returns:
+            是否成功连接
+        """
+        if not isinstance(self._transport_config, WebSocketAdapterOptions):
+            return True  # HTTP 模式不需要等待
+        
+        start = asyncio.get_event_loop().time()
+        while not self._closed:
+            if self._ws is not None and not self._ws.closed:
+                return True
+            if asyncio.get_event_loop().time() - start > timeout:
+                return False
+            await asyncio.sleep(0.1)
+        return False
 
     async def on_platform_message(self, raw: Any) -> None:
         """处理平台下发的单条消息并交给核心。"""
@@ -171,27 +211,69 @@ class AdapterBase:
         raise NotImplementedError
 
     async def _start_ws_transport(self, options: WebSocketAdapterOptions) -> None:
-        self._ws = await websockets.connect(options.url, extra_headers=options.headers)
-        self._ws_task = asyncio.create_task(self._ws_listen_loop(options))
+        """启动 WebSocket 传输，包含自动重连逻辑。"""
+        self._ws_task = asyncio.create_task(self._ws_connect_loop(options))
+
+    async def _ws_connect_loop(self, options: WebSocketAdapterOptions) -> None:
+        """WebSocket 连接循环，自动处理重连。"""
+        while not self._closed:
+            try:
+                self._ws = await websockets.connect(options.url, extra_headers=options.headers)
+                self._reconnect_attempts = 0  # 重置重连计数
+                logger.info(f"WebSocket 已连接到 {options.url}")
+                await self._ws_listen_loop(options)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                if self._closed:
+                    break
+                self._reconnect_attempts += 1
+                max_attempts = options.max_reconnect_attempts
+                if max_attempts is not None and self._reconnect_attempts > max_attempts:
+                    logger.error(f"WebSocket 重连失败，已达最大尝试次数 {max_attempts}")
+                    break
+                logger.warning(
+                    f"WebSocket 连接断开或失败: {e}，"
+                    f"将在 {options.reconnect_interval:.1f} 秒后重连 "
+                    f"(尝试 {self._reconnect_attempts}"
+                    f"{f'/{max_attempts}' if max_attempts else ''})"
+                )
+                await asyncio.sleep(options.reconnect_interval)
+            finally:
+                if self._ws and not self._ws.closed:
+                    try:
+                        await self._ws.close()
+                    except Exception:
+                        pass
+                self._ws = None
 
     async def _ws_listen_loop(self, options: WebSocketAdapterOptions) -> None:
+        """WebSocket 消息监听循环。"""
         assert self._ws is not None
         parser = options.incoming_parser or self._default_ws_parser
-        try:
-            async for raw in self._ws:
+        async for raw in self._ws:
+            if self._closed:
+                break
+            try:
                 payload = parser(raw)
                 await self.on_platform_message(payload)
-        finally:
-            pass
+            except Exception:
+                logger.exception("处理 WebSocket 消息失败")
 
     async def _send_via_ws(self, envelope: MessageEnvelope) -> None:
+        """通过 WebSocket 发送消息。"""
         if self._ws is None or self._ws.closed:
+            logger.warning("WebSocket 未连接，消息发送失败")
             raise RuntimeError("WebSocket transport is not active")
         encoder = None
         if isinstance(self._transport_config, WebSocketAdapterOptions):
             encoder = self._transport_config.outgoing_encoder
         data = encoder(envelope) if encoder else self._default_ws_encoder(envelope)
-        await self._ws.send(data)
+        try:
+            await self._ws.send(data)
+        except Exception as e:
+            logger.warning(f"WebSocket 发送消息失败: {e}")
+            raise
 
     async def _start_http_transport(self, options: HttpAdapterOptions) -> None:
         app = options.app or aiohttp_web.Application()

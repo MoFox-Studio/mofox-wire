@@ -344,6 +344,7 @@ class MessageClient(BaseMessageHandler):
         mode: Literal["ws", "tcp"] = "ws",
         *,
         reconnect_interval: float = 5.0,
+        max_reconnect_attempts: int | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         super().__init__()
@@ -360,6 +361,8 @@ class MessageClient(BaseMessageHandler):
         self._closed = False
         self._on_disconnect: DisconnectCallback | None = None
         self._reconnect_interval = reconnect_interval
+        self._max_reconnect_attempts = max_reconnect_attempts
+        self._reconnect_attempts = 0
         self._logger = logger or logging.getLogger("mofox_bus.client")
 
     async def connect(
@@ -375,6 +378,7 @@ class MessageClient(BaseMessageHandler):
         self._token = token
         self._ssl_verify = ssl_verify
         self._closed = False
+        self._reconnect_attempts = 0
         await self._establish_connection()
 
     def set_disconnect_callback(self, callback: DisconnectCallback) -> None:
@@ -473,9 +477,34 @@ class MessageClient(BaseMessageHandler):
             logging.getLogger("mofox_bus.client").exception("Disconnect callback failed")
 
     async def _reconnect(self) -> None:
-        self._logger.info(f"WebSocket 连接断开, 正在 {self._reconnect_interval:.1f} 秒后重试")
-        await asyncio.sleep(self._reconnect_interval)
-        await self._connect_once()
+        """尝试重连 WebSocket，带有错误处理和重试限制。"""
+        while not self._closed:
+            self._reconnect_attempts += 1
+            max_attempts = self._max_reconnect_attempts
+            
+            if max_attempts is not None and self._reconnect_attempts > max_attempts:
+                self._logger.error(f"WebSocket 重连失败，已达最大尝试次数 {max_attempts}")
+                return
+            
+            self._logger.info(
+                f"WebSocket 连接断开, 将在 {self._reconnect_interval:.1f} 秒后重试 "
+                f"(尝试 {self._reconnect_attempts}"
+                f"{f'/{max_attempts}' if max_attempts else ''})"
+            )
+            await asyncio.sleep(self._reconnect_interval)
+            
+            if self._closed:
+                return
+                
+            try:
+                await self._connect_once()
+                self._reconnect_attempts = 0  # 连接成功后重置计数
+                return  # 连接成功，退出重连循环
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._logger.warning(f"WebSocket 重连失败: {e}")
+                # 继续循环重试
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None:
