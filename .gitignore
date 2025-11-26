@@ -1,0 +1,5 @@
+mofox_wire/build/
+mofox_wire/dist/
+mofox_wire/mofox_wire.egg-info/
+.claude/
+__pycache__
