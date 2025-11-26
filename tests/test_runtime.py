@@ -54,9 +54,12 @@ class TestMessageRoute:
             name="test_route",
             message_type="text",
         )
-        
+
+        # 严格验证路由的所有属性
         assert route.name == "test_route"
         assert route.message_type == "text"
+        assert route.predicate is predicate
+        assert route.handler is handler
 
     def test_route_with_multiple_types(self):
         """测试多类型路由"""
@@ -70,8 +73,12 @@ class TestMessageRoute:
             handler=handler,
             message_types={"text", "image"},
         )
-        
+
+        # 严格验证多类型路由的属性
         assert route.message_types == {"text", "image"}
+        assert route.predicate is predicate
+        assert route.handler is handler
+        assert route.name is None
 
     def test_route_with_event_types(self):
         """测试事件类型路由"""
@@ -85,8 +92,12 @@ class TestMessageRoute:
             handler=handler,
             event_types={"message.receive", "message.send"},
         )
-        
-        assert "message.receive" in route.event_types
+
+        # 严格验证事件类型包含所有预期事件且无多余事件
+        expected_event_types = {"message.receive", "message.send"}
+        assert route.event_types == expected_event_types
+        assert route.predicate is predicate
+        assert route.handler is handler
 
 
 # ============================================================
@@ -110,8 +121,12 @@ class TestMessageRuntimeBasic:
             handler=handler,
             name="test_route",
         )
-        
+
+        # 严格验证路由数量和路由属性
         assert len(runtime._routes) == 1
+        added_route = runtime._routes[0]
+        assert added_route.name == "test_route"
+        assert added_route.handler is handler
 
     @pytest.mark.asyncio
     async def test_handle_message_matches_route(self, runtime: MessageRuntime):
@@ -123,9 +138,12 @@ class TestMessageRuntimeBasic:
         )
         
         msg = make_message()
-        await runtime.handle_message(msg)
-        
+        result = await runtime.handle_message(msg)
+
+        # 严格验证处理器被调用且参数完全匹配
         handler.assert_called_once_with(msg)
+        assert handler.call_count == 1
+        assert result is None  # 处理器返回 None
 
     @pytest.mark.asyncio
     async def test_handle_message_no_match(self, runtime: MessageRuntime):
@@ -138,8 +156,10 @@ class TestMessageRuntimeBasic:
         
         msg = make_message()
         result = await runtime.handle_message(msg)
-        
+
+        # 严格验证处理器未被调用且返回结果为 None
         handler.assert_not_called()
+        assert handler.call_count == 0
         assert result is None
 
     @pytest.mark.asyncio
@@ -154,8 +174,11 @@ class TestMessageRuntimeBasic:
         
         msg = make_message()
         result = await runtime.handle_message(msg)
-        
+
+        # 严格验证返回结果与预期响应完全一致
+        assert result is response_msg
         assert result == response_msg
+        handler.assert_called_once_with(msg)
 
 
 # ============================================================

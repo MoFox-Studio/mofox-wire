@@ -77,13 +77,24 @@ class TestHttpMessageServer:
         mock_request.read = AsyncMock(return_value=payload)
         
         response = await server._handle_messages(mock_request)
-        
+
+        # 严格验证响应状态
         assert response.status == 200
+        assert response.reason == "OK"
+
+        # 严格验证处理器被调用且参数正确
         handler.assert_called_once()
-        
-        # 验证处理器收到的消息
+        assert handler.call_count == 1
+
+        # 验证处理器收到的消息数量和内容
         call_args = handler.call_args[0][0]
+        assert isinstance(call_args, list)
         assert len(call_args) == 3
+
+        # 验证每条消息的结构
+        for i, msg in enumerate(call_args):
+            assert msg["message_segment"]["data"] == f"msg_{i}"
+            assert msg["message_info"]["platform"] == "test"
 
     @pytest.mark.asyncio
     async def test_handle_messages_with_response(self, handler: AsyncMock):
@@ -100,11 +111,17 @@ class TestHttpMessageServer:
         mock_request.read = AsyncMock(return_value=payload)
         
         response = await server._handle_messages(mock_request)
-        
+
+        # 严格验证响应状态和内容
         assert response.status == 200
-        # 验证响应包含消息
+        assert response.reason == "OK"
+        assert response.body is not None
+
+        # 验证响应包含消息且消息内容正确
         result = loads_messages(response.body)
+        assert isinstance(result, list)
         assert len(result) == 1
+        assert result[0]["message_segment"]["data"] == "response"
 
 
 # ============================================================

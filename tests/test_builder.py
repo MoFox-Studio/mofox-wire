@@ -23,11 +23,18 @@ class TestMessageBuilderBasic:
             .text("Hello")
             .build()
         )
-        
+
+        # 严格验证消息的所有关键字段
+        assert msg["direction"] == "outgoing"  # 默认方向
         assert msg["message_info"]["platform"] == "test"
         assert msg["message_info"]["user_info"]["user_id"] == "user_1"
         assert msg["message_segment"]["type"] == "text"
         assert msg["message_segment"]["data"] == "Hello"
+
+        # 验证必需字段存在
+        assert "message_id" in msg["message_info"]
+        assert "time" in msg["message_info"]
+        assert len(msg["message_info"]) >= 3  # 至少包含 platform, message_id, time, user_info
 
     def test_build_requires_segment(self):
         """测试构建消息需要至少一个段落"""
@@ -73,9 +80,14 @@ class TestMessageBuilderBasic:
             .build()
         )
         after = time.time()
-        
+
         msg_time = msg["message_info"]["time"]
+
+        # 严格验证时间戳的合理性和精度
+        assert isinstance(msg_time, float)
         assert before <= msg_time <= after
+        assert msg_time > 0  # 时间戳应该是正数
+        assert msg_time > 1600000000  # 应该是相对较新的时间戳（2020年后）
 
 
 class TestMessageBuilderDirection:
@@ -294,11 +306,24 @@ class TestMessageBuilderSegments:
         )
         
         segments = msg["message_segment"]
+
+        # 严格验证多段消息的结构和内容
         assert isinstance(segments, list)
         assert len(segments) == 3
+
+        # 验证每个段的类型和数据
         assert segments[0]["type"] == "text"
+        assert segments[0]["data"] == "Hello"
+
         assert segments[1]["type"] == "image"
+        assert segments[1]["data"] == "https://example.com/1.png"
+
         assert segments[2]["type"] == "text"
+        assert segments[2]["data"] == "Goodbye"
+
+        # 确保没有其他字段
+        for segment in segments:
+            assert set(segment.keys()) == {"type", "data"}
 
     def test_single_segment_not_list(self):
         """测试单个段不是列表"""

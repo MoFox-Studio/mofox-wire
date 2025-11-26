@@ -37,8 +37,12 @@ class TestSegPayload:
     def test_text_segment(self):
         """测试文本段"""
         seg: SegPayload = {"type": "text", "data": "Hello, World!"}
+
+        # 严格验证段的所有属性
         assert seg["type"] == "text"
         assert seg["data"] == "Hello, World!"
+        assert len(seg) == 2  # 确保只有这两个字段
+        assert set(seg.keys()) == {"type", "data"}
 
     def test_image_segment(self):
         """测试图片段"""
@@ -49,9 +53,14 @@ class TestSegPayload:
         """测试嵌套段"""
         inner: SegPayload = {"type": "text", "data": "inner"}
         outer: SegPayload = {"type": "quote", "data": [inner]}
+
+        # 严格验证嵌套段的结构
         assert outer["type"] == "quote"
         assert isinstance(outer["data"], list)
+        assert len(outer["data"]) == 1
+        assert outer["data"][0] is inner  # 验证是同一个对象
         assert outer["data"][0]["type"] == "text"
+        assert outer["data"][0]["data"] == "inner"
 
     def test_segment_with_translated_data(self):
         """测试带翻译数据的段"""
@@ -80,10 +89,18 @@ class TestUserInfoPayload:
             "user_cardname": "Card Name",
             "user_avatar": "https://example.com/avatar.png",
         }
-        assert user["platform"] == "qq"
-        assert user["user_nickname"] == "TestUser"
-        assert user["user_cardname"] == "Card Name"
-        assert user["user_avatar"] == "https://example.com/avatar.png"
+
+        # 严格验证用户信息的所有字段
+        expected_user = {
+            "platform": "qq",
+            "user_id": "12345",
+            "user_nickname": "TestUser",
+            "user_cardname": "Card Name",
+            "user_avatar": "https://example.com/avatar.png",
+        }
+        assert user == expected_user
+        assert len(user) == 5  # 确保字段数量正确
+        assert set(user.keys()) == {"platform", "user_id", "user_nickname", "user_cardname", "user_avatar"}
 
 
 class TestGroupInfoPayload:

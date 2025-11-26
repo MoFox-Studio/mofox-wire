@@ -55,16 +55,23 @@ class TestInProcessCoreSink:
         """测试发送单条消息"""
         msg = make_message()
         await sink.send(msg)
-        
+
+        # 严格验证处理器被调用且参数完全匹配
         handler.assert_called_once_with(msg)
+        assert handler.call_count == 1
 
     @pytest.mark.asyncio
     async def test_send_many_messages(self, sink: InProcessCoreSink, handler: AsyncMock):
         """测试批量发送消息"""
         messages = [make_message(text=f"msg_{i}") for i in range(3)]
         await sink.send_many(messages)
-        
+
+        # 严格验证处理器被调用且每条消息都被正确处理
         assert handler.call_count == 3
+
+        # 验证每次调用的参数
+        for i, call in enumerate(handler.call_args_list):
+            assert call[0][0] == messages[i]  # 验证第i条消息被正确传递
 
     @pytest.mark.asyncio
     async def test_set_outgoing_handler(self, sink: InProcessCoreSink):
@@ -156,8 +163,14 @@ class TestProcessCoreSink:
         
         # 检查队列中的消息
         item = to_core.get(timeout=1)
+
+        # 严格验证队列消息的结构和内容
+        assert isinstance(item, dict)
         assert item["kind"] == "incoming"
+        assert "payload" in item
         assert item["payload"]["message_info"]["platform"] == "test"
+        assert item["payload"]["message_segment"]["data"] == "hello"
+        assert len(item.keys()) == 2  # 只有 kind 和 payload 字段
         
         await sink.close()
 
