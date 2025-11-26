@@ -3,9 +3,9 @@ requires = ["hatchling>=1.18", "editables>=0.5"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mofox-bus"
+name = "mofox-wire"
 version = "0.1.0"
-description = "Messaging bus for MoFox Bot with HTTP/WebSocket transports and routing helpers."
+description = "Messaging wire for MoFox Bot with HTTP/WebSocket transports and routing helpers."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mofox-bot/mofox-bus"
+Homepage = "https://github.com/mofox-bot/mofox-wire"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mofox_bus"]
+packages = ["mofox_wire"]

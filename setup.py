@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Setup script for mofox-bus package.
+Setup script for mofox-wire package.
 """
 
 from setuptools import setup, find_packages
@@ -18,25 +18,25 @@ def read_license():
 
 # Get version from __init__.py
 def get_version():
-    with open("mofox_bus/__init__.py", "r", encoding="utf-8") as f:
+    with open("mofox_wire/__init__.py", "r", encoding="utf-8") as f:
         for line in f:
             if line.startswith("__version__"):
                 return line.split("=")[1].strip().strip('"').strip("'")
     return "0.1.0"  # fallback version
 
 setup(
-    name="mofox-bus",
+    name="mofox-wire",
     version=get_version(),
     author="MoFox Team",
     author_email="",
-    description="Messaging bus for MoFox Bot with HTTP/WebSocket transports and routing helpers",
+    description="Messaging wire for MoFox Bot with HTTP/WebSocket transports and routing helpers",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
-    url="https://github.com/mofox-bot/mofox-bus",
+    url="https://github.com/mofox-bot/mofox-wire",
     project_urls={
-        "Bug Tracker": "https://github.com/mofox-bot/mofox-bus/issues",
-        "Documentation": "https://github.com/mofox-bot/mofox-bus/wiki",
-        "Source Code": "https://github.com/mofox-bot/mofox-bus",
+        "Bug Tracker": "https://github.com/mofox-bot/mofox-wire/issues",
+        "Documentation": "https://github.com/mofox-bot/mofox-wire/wiki",
+        "Source Code": "https://github.com/mofox-bot/mofox-wire",
     },
     packages=find_packages(exclude=["tests*", "docs*", "examples*"]),
     classifiers=[
@@ -80,7 +80,7 @@ setup(
     },
     keywords=[
         "messaging",
-        "bus",
+        "wire",
         "asyncio",
         "websocket",
         "http",

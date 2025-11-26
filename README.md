@@ -1,10 +1,10 @@
-# MoFox Bus
+# MoFox Wire
 
-[![PyPI version](https://badge.fury.io/py/mofox-bus.svg)](https://badge.fury.io/py/mofox-bus)
-[![Python versions](https://img.shields.io/pypi/pyversions/mofox-bus.svg)](https://pypi.org/project/mofox-bus/)
+[![PyPI version](https://badge.fury.io/py/mofox-wire.svg)](https://badge.fury.io/py/mofox-wire)
+[![Python versions](https://img.shields.io/pypi/pyversions/mofox-wire.svg)](https://pypi.org/project/mofox-wire/)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://opensource.org/licenses/GPL-3.0)
 
-MoFox Bus is a lightweight, high-performance messaging bus designed for MoFox Bot and similar chatbot applications. It provides a robust foundation for building message-driven systems with support for typed message envelopes, flexible routing, and multiple transport protocols.
+MoFox Wire is a lightweight, high-performance messaging wire designed for MoFox Bot and similar chatbot applications. It provides a robust foundation for building message-driven systems with support for typed message envelopes, flexible routing, and multiple transport protocols.
 
 ## ✨ Features
 
@@ -21,14 +21,14 @@ MoFox Bus is a lightweight, high-performance messaging bus designed for MoFox Bo
 Install from PyPI (recommended):
 
 ```bash
-pip install mofox-bus
+pip install mofox-wire
 ```
 
 Install from source:
 
 ```bash
-git clone https://github.com/mofox-bot/mofox-bus.git
-cd mofox-bus
+git clone https://github.com/mofox-bot/mofox-wire.git
+cd mofox-wire
 pip install -e .
 ```
 
@@ -348,9 +348,9 @@ This project is licensed under the GPL-3.0 License. See the [LICENSE](LICENSE) f
 
 ## 📞 Support
 
-- 📖 [Documentation](https://github.com/mofox-bot/mofox-bus/wiki)
-- 🐛 [Issue Tracker](https://github.com/mofox-bot/mofox-bus/issues)
-- 💬 [Discussions](https://github.com/mofox-bot/mofox-bus/discussions)
+- 📖 [Documentation](https://github.com/mofox-bot/mofox-wire/wiki)
+- 🐛 [Issue Tracker](https://github.com/mofox-bot/mofox-wire/issues)
+- 💬 [Discussions](https://github.com/mofox-bot/mofox-wire/discussions)
 
 ## 🔗 Related Projects
 
