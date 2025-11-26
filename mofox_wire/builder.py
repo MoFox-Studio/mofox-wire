@@ -95,6 +95,10 @@ class MessageBuilder:
         }
         return self
 
+    def seg_list(self, segments: List[SegPayload]) -> "MessageBuilder":
+        self._segments.extend(segments)
+        return self
+    
     def build(self) -> MessageEnvelope:
         """构建最终的消息信封"""
         # 设置 message_info 默认值
@@ -102,9 +106,20 @@ class MessageBuilder:
             raise ValueError("需要至少添加一个消息段才能构建消息")
         if self._message_id is None:
             self._message_id = str(uuid.uuid4())
-        info = dict(self._message_info)
+        info = self._message_info
         info.setdefault("message_id", self._message_id)
         info.setdefault("time", time.time())
+        # 检查是否有group_info，并检查group_info中是否有platform
+        if "group_info" in info.keys():
+            group_info: GroupInfoPayload = info["group_info"]
+            if "platform" in info and group_info.get("platform") is None:
+                info["group_info"]["platform"] = info["platform"]
+        
+        # 检查是否有user_info，并检查user_info中是否有platform
+        if "user_info" in info.keys():
+            user_info: UserInfoPayload = info["user_info"] 
+            if "platform" in info and user_info.get("platform") is None:
+                info["user_info"]["platform"] = info["platform"]
 
         segments = [seg.copy() if isinstance(seg, dict) else seg for seg in self._segments]
         envelope: MessageEnvelope = {

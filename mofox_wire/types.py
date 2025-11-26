@@ -20,7 +20,7 @@ class SegPayload(TypedDict, total=False):
 
 
 class UserInfoPayload(TypedDict, total=False):
-    platform: NotRequired[str]
+    platform: Required[str]
     user_id: Required[str]
     user_nickname: NotRequired[str]
     user_cardname: NotRequired[str]
@@ -28,9 +28,9 @@ class UserInfoPayload(TypedDict, total=False):
 
 
 class GroupInfoPayload(TypedDict, total=False):
-    platform: NotRequired[str]
+    platform: Required[str]
     group_id: Required[str]
-    group_name: NotRequired[str]
+    group_name: Required[str]
 
 
 class FormatInfoPayload(TypedDict, total=False):
