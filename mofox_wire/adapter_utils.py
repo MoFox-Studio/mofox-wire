@@ -491,7 +491,9 @@ class ProcessCoreSink(CoreSink):
         if self._closed:
             return
         self._closed = True
-        await self._loop.run_in_executor(self._io_executor, self._from_core_queue.put, self._CONTROL_STOP)
+        loop = asyncio.get_running_loop()
+        # 使用默认线程池放入停止信号，避免与单线程执行器竞争导致阻塞
+        await loop.run_in_executor(None, self._from_core_queue.put, self._CONTROL_STOP)
         if self._listener_task:
             self._listener_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -589,12 +591,10 @@ class ProcessCoreSinkServer:
         if self._closed:
             return
         self._closed = True
-        await self._loop.run_in_executor(
-            self._incoming_executor, self._incoming_queue.put, {"__core_sink_control__": "stop"}
-        )
-        await self._loop.run_in_executor(
-            self._outgoing_executor, self._outgoing_queue.put, ProcessCoreSink._CONTROL_STOP
-        )
+        loop = asyncio.get_running_loop()
+        # 使用默认线程池放入停止信号，避免与单线程执行器互相阻塞
+        await loop.run_in_executor(None, self._incoming_queue.put, {"__core_sink_control__": "stop"})
+        await loop.run_in_executor(None, self._outgoing_queue.put, ProcessCoreSink._CONTROL_STOP)
         if self._task:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
