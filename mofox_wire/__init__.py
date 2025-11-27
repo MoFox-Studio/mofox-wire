@@ -5,7 +5,7 @@ MoFox 内部通用消息线路实现。
 供核心进程与各类平台适配器共享。
 """
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 from . import codec, types
 from .adapter_utils import (
