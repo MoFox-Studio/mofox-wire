@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mofox_wire import MessageBuilder, MessageEnvelope
-from mofox_wire.router import RouteConfig, Router, TargetConfig
+from mofox_wire.router import RouteConfig, Router, TargetConfig, HandlerEntry, DEFAULT_PRIORITY
 
 
 # ============================================================
@@ -160,7 +160,9 @@ class TestRouterBasic:
         
         router.register_class_handler(handler)
         
-        assert handler in router.handlers
+        assert len(router.handlers) == 1
+        assert router.handlers[0].handler is handler
+        assert router.handlers[0].priority == DEFAULT_PRIORITY
 
     @pytest.mark.asyncio
     async def test_connect_unknown_platform_raises(self, route_config: RouteConfig):
@@ -398,3 +400,187 @@ class TestRouterLifecycle:
         await router.remove_platform("test")
         
         assert real_task.cancelled() or real_task.done()
+
+
+# ============================================================
+# 测试 Router 优先度功能
+# ============================================================
+
+class TestRouterPriority:
+    """测试路由器优先度功能"""
+
+    @pytest.fixture
+    def route_config(self) -> RouteConfig:
+        return RouteConfig(
+            route_config={
+                "test_platform": TargetConfig(url="ws://localhost:19003/ws"),
+            }
+        )
+
+    def test_register_handler_with_priority(self, route_config: RouteConfig):
+        """测试注册带优先度的处理器"""
+        router = Router(config=route_config)
+        handler = MagicMock()
+        
+        router.register_class_handler(handler, priority=10)
+        
+        assert len(router.handlers) == 1
+        assert router.handlers[0].handler is handler
+        assert router.handlers[0].priority == 10
+
+    def test_handlers_sorted_by_priority(self, route_config: RouteConfig):
+        """测试处理器按优先度排序"""
+        router = Router(config=route_config)
+        
+        low_handler = MagicMock(name="low")
+        mid_handler = MagicMock(name="mid")
+        high_handler = MagicMock(name="high")
+        
+        # 以乱序注册
+        router.register_class_handler(mid_handler, priority=5)
+        router.register_class_handler(low_handler, priority=1)
+        router.register_class_handler(high_handler, priority=10)
+        
+        # 验证按优先度降序排列
+        assert len(router.handlers) == 3
+        assert router.handlers[0].priority == 10
+        assert router.handlers[0].handler is high_handler
+        assert router.handlers[1].priority == 5
+        assert router.handlers[1].handler is mid_handler
+        assert router.handlers[2].priority == 1
+        assert router.handlers[2].handler is low_handler
+
+    @pytest.mark.asyncio
+    async def test_priority_dispatch_only_highest(self, route_config: RouteConfig):
+        """测试只有最高优先度的处理器被调用"""
+        router = Router(config=route_config)
+        
+        low_handler = AsyncMock(name="low")
+        high_handler = AsyncMock(name="high")
+        
+        router.register_class_handler(low_handler, priority=1)
+        router.register_class_handler(high_handler, priority=10)
+        
+        message = make_message()
+        await router._priority_dispatch(message)
+        
+        # 只有高优先度处理器被调用
+        high_handler.assert_called_once_with(message)
+        low_handler.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_priority_dispatch_same_priority_all_called(self, route_config: RouteConfig):
+        """测试相同优先度的处理器都被调用"""
+        router = Router(config=route_config)
+        
+        handler1 = AsyncMock(name="handler1")
+        handler2 = AsyncMock(name="handler2")
+        handler3 = AsyncMock(name="handler3")
+        low_handler = AsyncMock(name="low")
+        
+        # 三个相同优先度的处理器
+        router.register_class_handler(handler1, priority=10)
+        router.register_class_handler(handler2, priority=10)
+        router.register_class_handler(handler3, priority=10)
+        # 一个低优先度处理器
+        router.register_class_handler(low_handler, priority=1)
+        
+        message = make_message()
+        await router._priority_dispatch(message)
+        
+        # 所有高优先度处理器都被调用
+        handler1.assert_called_once_with(message)
+        handler2.assert_called_once_with(message)
+        handler3.assert_called_once_with(message)
+        # 低优先度处理器不被调用
+        low_handler.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_priority_dispatch_empty_handlers(self, route_config: RouteConfig):
+        """测试无处理器时的分发"""
+        router = Router(config=route_config)
+        
+        message = make_message()
+        # 不应抛出异常
+        await router._priority_dispatch(message)
+
+    @pytest.mark.asyncio
+    async def test_priority_dispatch_sync_handler(self, route_config: RouteConfig):
+        """测试同步处理器的优先度分发"""
+        router = Router(config=route_config)
+        
+        results = []
+        
+        def sync_high_handler(msg):
+            results.append("high")
+        
+        def sync_low_handler(msg):
+            results.append("low")
+        
+        router.register_class_handler(sync_low_handler, priority=1)
+        router.register_class_handler(sync_high_handler, priority=10)
+        
+        message = make_message()
+        await router._priority_dispatch(message)
+        
+        # 只有高优先度处理器被调用
+        assert results == ["high"]
+
+    @pytest.mark.asyncio
+    async def test_priority_dispatch_handler_exception(self, route_config: RouteConfig):
+        """测试处理器异常不影响其他处理器"""
+        router = Router(config=route_config)
+        
+        results = []
+        
+        async def failing_handler(msg):
+            raise ValueError("Test error")
+        
+        async def working_handler(msg):
+            results.append("worked")
+        
+        # 两个相同优先度的处理器，一个会抛出异常
+        router.register_class_handler(failing_handler, priority=10)
+        router.register_class_handler(working_handler, priority=10)
+        
+        message = make_message()
+        # 不应抛出异常
+        await router._priority_dispatch(message)
+        
+        # 正常的处理器仍然被调用
+        assert results == ["worked"]
+
+    def test_negative_priority(self, route_config: RouteConfig):
+        """测试负优先度"""
+        router = Router(config=route_config)
+        
+        negative_handler = MagicMock(name="negative")
+        zero_handler = MagicMock(name="zero")
+        positive_handler = MagicMock(name="positive")
+        
+        router.register_class_handler(negative_handler, priority=-5)
+        router.register_class_handler(zero_handler, priority=0)
+        router.register_class_handler(positive_handler, priority=5)
+        
+        # 验证按优先度降序排列
+        assert router.handlers[0].priority == 5
+        assert router.handlers[1].priority == 0
+        assert router.handlers[2].priority == -5
+
+    @pytest.mark.asyncio
+    async def test_priority_dispatch_with_negative_priority(self, route_config: RouteConfig):
+        """测试负优先度时的分发"""
+        router = Router(config=route_config)
+        
+        negative_handler = AsyncMock(name="negative")
+        more_negative_handler = AsyncMock(name="more_negative")
+        
+        router.register_class_handler(negative_handler, priority=-1)
+        router.register_class_handler(more_negative_handler, priority=-10)
+        
+        message = make_message()
+        await router._priority_dispatch(message)
+        
+        # -1 优先度更高
+        negative_handler.assert_called_once_with(message)
+        more_negative_handler.assert_not_called()

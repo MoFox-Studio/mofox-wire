@@ -3,13 +3,22 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from dataclasses import asdict, dataclass
-from typing import Callable, Dict, Optional
+from collections import defaultdict
+from dataclasses import asdict, dataclass, field
+from typing import Callable, Dict, List, Optional
 
 from .api import MessageClient
+from .runtime import DEFAULT_PRIORITY
 from .types import MessageEnvelope
 
 logger = logging.getLogger("mofox_bus.router")
+
+
+@dataclass
+class HandlerEntry:
+    """处理器条目，包含处理器函数和优先度"""
+    handler: Callable[[Dict], None]
+    priority: int = DEFAULT_PRIORITY
 
 
 @dataclass
@@ -67,7 +76,7 @@ class Router:
             logger.handlers = custom_logger.handlers
         self.config = config
         self.clients: Dict[str, MessageClient] = {}
-        self.handlers: list[Callable[[Dict], None]] = []
+        self.handlers: List[HandlerEntry] = []
         self._running = False
         self._client_tasks: Dict[str, asyncio.Task] = {}
         self._stop_event: asyncio.Event | None = None
@@ -97,16 +106,65 @@ class Router:
             token=target.token,
             ssl_verify=target.ssl_verify,
         )
-        for handler in self.handlers:
-            client.register_message_handler(handler)
+        # 注册优先度路由处理器
+        client.register_message_handler(self._priority_dispatch)
         self.clients[platform] = client
         if self._running:
             self._start_client_task(platform, client)
 
-    def register_class_handler(self, handler: Callable[[Dict], None]) -> None:
-        self.handlers.append(handler)
-        for client in self.clients.values():
-            client.register_message_handler(handler)
+    def register_class_handler(
+        self, handler: Callable[[Dict], None], priority: int = DEFAULT_PRIORITY
+    ) -> None:
+        """
+        注册消息处理器
+
+        Args:
+            handler: 消息处理函数
+            priority: 优先度，数值越大优先级越高。默认为 0。
+                     消息只会被路由到最高优先度的处理器。
+                     相同优先度的处理器会同时收到消息。
+        """
+        entry = HandlerEntry(handler=handler, priority=priority)
+        self.handlers.append(entry)
+        # 按优先度降序排序，保证高优先度在前
+        self.handlers.sort(key=lambda e: e.priority, reverse=True)
+
+    async def _priority_dispatch(self, message: Dict) -> None:
+        """
+        按优先度分发消息到处理器
+
+        消息只会被路由到最高优先度的处理器。
+        相同优先度的处理器会同时收到消息（并发执行）。
+
+        Args:
+            message: 消息负载
+        """
+        if not self.handlers:
+            return
+
+        # 获取最高优先度
+        highest_priority = self.handlers[0].priority
+
+        # 收集所有最高优先度的处理器
+        top_handlers = [
+            entry.handler
+            for entry in self.handlers
+            if entry.priority == highest_priority
+        ]
+
+        # 并发执行所有最高优先度的处理器
+        tasks: list[asyncio.Task] = []
+        for handler in top_handlers:
+            try:
+                result = handler(message)
+                if asyncio.iscoroutine(result):
+                    task = asyncio.create_task(result)
+                    tasks.append(task)
+            except Exception:
+                logger.exception("消息处理失败")
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def run(self) -> None:
         """启动路由器，连接所有配置的平台并开始运行"""

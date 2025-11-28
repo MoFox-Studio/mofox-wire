@@ -23,8 +23,8 @@ from .adapter_utils import (
 from .api import MessageClient, MessageServer
 from .codec import dumps_message, dumps_messages, loads_message, loads_messages
 from .builder import MessageBuilder
-from .router import RouteConfig, Router, TargetConfig
-from .runtime import MessageProcessingError, MessageRoute, MessageRuntime, Middleware
+from .router import RouteConfig, Router, TargetConfig, HandlerEntry
+from .runtime import DEFAULT_PRIORITY, MessageProcessingError, MessageRoute, MessageRuntime, Middleware
 from .types import (
     FormatInfoPayload,
     GroupInfoPayload,
@@ -65,6 +65,8 @@ __all__ = [
     "Router",
     "RouteConfig",
     "TargetConfig",
+    "HandlerEntry",
+    "DEFAULT_PRIORITY",
     # Adapter helpers
     "AdapterTransportOptions",
     "AdapterBase",

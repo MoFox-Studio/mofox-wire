@@ -240,22 +240,34 @@ class TestMessageTypeRouting:
         handler.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_duplicate_type_registration_raises(self, runtime: MessageRuntime):
-        """测试重复注册同一类型抛出异常"""
+    async def test_same_type_multiple_handlers_with_priority(self, runtime: MessageRuntime):
+        """测试同一类型可以有多个处理器（通过优先度区分）"""
+        handler1 = AsyncMock(return_value=None)
+        handler2 = AsyncMock(return_value=None)
+        
         runtime.add_route(
             predicate=lambda msg: True,
-            handler=AsyncMock(),
+            handler=handler1,
             name="handler1",
             message_type="text",
+            priority=10,
         )
         
-        with pytest.raises(ValueError, match="消息类型 'text' 已被处理器"):
-            runtime.add_route(
-                predicate=lambda msg: True,
-                handler=AsyncMock(),
-                name="handler2",
-                message_type="text",
-            )
+        # 不再抛出异常，可以注册多个同类型处理器
+        runtime.add_route(
+            predicate=lambda msg: True,
+            handler=handler2,
+            name="handler2",
+            message_type="text",
+            priority=1,
+        )
+        
+        msg = make_message(msg_type="text")
+        await runtime.handle_message(msg)
+        
+        # 只有高优先度处理器被调用
+        handler1.assert_called_once()
+        handler2.assert_not_called()
 
 
 # ============================================================
@@ -676,3 +688,273 @@ class TestInstanceMethodRouting:
         
         # 至少有一个处理器收到消息
         assert len(received1) + len(received2) >= 1
+
+
+# ============================================================
+# 测试优先度功能
+# ============================================================
+
+class TestRoutePriority:
+    """测试路由优先度功能"""
+
+    @pytest.mark.asyncio
+    async def test_add_route_with_priority(self):
+        """测试添加带优先度的路由"""
+        runtime = MessageRuntime()
+        
+        async def handler(msg):
+            return msg
+        
+        runtime.add_route(lambda msg: True, handler, priority=10)
+        
+        assert len(runtime._routes) == 1
+        assert runtime._routes[0].priority == 10
+
+    @pytest.mark.asyncio
+    async def test_routes_sorted_by_priority(self):
+        """测试路由按优先度排序"""
+        runtime = MessageRuntime()
+        
+        async def handler_low(msg):
+            return msg
+        async def handler_mid(msg):
+            return msg
+        async def handler_high(msg):
+            return msg
+        
+        # 以乱序添加
+        runtime.add_route(lambda msg: True, handler_mid, name="mid", priority=5)
+        runtime.add_route(lambda msg: True, handler_low, name="low", priority=1)
+        runtime.add_route(lambda msg: True, handler_high, name="high", priority=10)
+        
+        # 验证按优先度降序排列
+        assert len(runtime._routes) == 3
+        assert runtime._routes[0].priority == 10
+        assert runtime._routes[0].name == "high"
+        assert runtime._routes[1].priority == 5
+        assert runtime._routes[1].name == "mid"
+        assert runtime._routes[2].priority == 1
+        assert runtime._routes[2].name == "low"
+
+    @pytest.mark.asyncio
+    async def test_only_highest_priority_handler_called(self):
+        """测试只有最高优先度的处理器被调用"""
+        runtime = MessageRuntime()
+        
+        results = []
+        
+        async def handler_low(msg):
+            results.append("low")
+            return msg
+        
+        async def handler_high(msg):
+            results.append("high")
+            return msg
+        
+        runtime.add_route(lambda msg: True, handler_low, priority=1)
+        runtime.add_route(lambda msg: True, handler_high, priority=10)
+        
+        msg = make_message()
+        await runtime.handle_message(msg)
+        
+        # 只有高优先度处理器被调用
+        assert results == ["high"]
+
+    @pytest.mark.asyncio
+    async def test_same_priority_handlers_all_called(self):
+        """测试相同优先度的处理器都被调用"""
+        runtime = MessageRuntime()
+        
+        results = []
+        
+        async def handler1(msg):
+            results.append("handler1")
+            return msg
+        
+        async def handler2(msg):
+            results.append("handler2")
+            return None
+        
+        async def handler3(msg):
+            results.append("handler3")
+            return None
+        
+        async def handler_low(msg):
+            results.append("low")
+            return msg
+        
+        # 三个相同优先度的处理器
+        runtime.add_route(lambda msg: True, handler1, priority=10)
+        runtime.add_route(lambda msg: True, handler2, priority=10)
+        runtime.add_route(lambda msg: True, handler3, priority=10)
+        # 一个低优先度处理器
+        runtime.add_route(lambda msg: True, handler_low, priority=1)
+        
+        msg = make_message()
+        await runtime.handle_message(msg)
+        
+        # 所有高优先度处理器都被调用（顺序可能不确定）
+        assert "handler1" in results
+        assert "handler2" in results
+        assert "handler3" in results
+        # 低优先度处理器不被调用
+        assert "low" not in results
+
+    @pytest.mark.asyncio
+    async def test_on_message_decorator_with_priority(self):
+        """测试 on_message 装饰器支持优先度"""
+        runtime = MessageRuntime()
+        
+        results = []
+        
+        @runtime.on_message(message_type="text", priority=10)
+        async def high_handler(msg):
+            results.append("high")
+            return msg
+        
+        @runtime.on_message(message_type="text", priority=1)
+        async def low_handler(msg):
+            results.append("low")
+            return msg
+        
+        msg = make_message(msg_type="text")
+        await runtime.handle_message(msg)
+        
+        assert results == ["high"]
+
+    @pytest.mark.asyncio
+    async def test_route_decorator_with_priority(self):
+        """测试 route 装饰器支持优先度"""
+        runtime = MessageRuntime()
+        
+        results = []
+        
+        @runtime.route(lambda msg: True, priority=10)
+        async def high_handler(msg):
+            results.append("high")
+            return msg
+        
+        @runtime.route(lambda msg: True, priority=1)
+        async def low_handler(msg):
+            results.append("low")
+            return msg
+        
+        msg = make_message()
+        await runtime.handle_message(msg)
+        
+        assert results == ["high"]
+
+    @pytest.mark.asyncio
+    async def test_negative_priority(self):
+        """测试负优先度"""
+        runtime = MessageRuntime()
+        
+        results = []
+        
+        async def handler_negative(msg):
+            results.append("negative")
+            return msg
+        
+        async def handler_zero(msg):
+            results.append("zero")
+            return msg
+        
+        runtime.add_route(lambda msg: True, handler_negative, priority=-5)
+        runtime.add_route(lambda msg: True, handler_zero, priority=0)
+        
+        msg = make_message()
+        await runtime.handle_message(msg)
+        
+        # 0 优先度更高
+        assert results == ["zero"]
+
+    @pytest.mark.asyncio
+    async def test_priority_with_message_type_filter(self):
+        """测试优先度与消息类型过滤器结合"""
+        runtime = MessageRuntime()
+        
+        results = []
+        
+        @runtime.on_message(message_type="text", priority=10)
+        async def high_text_handler(msg):
+            results.append("high_text")
+            return msg
+        
+        @runtime.on_message(message_type="text", priority=1)
+        async def low_text_handler(msg):
+            results.append("low_text")
+            return msg
+        
+        @runtime.on_message(message_type="image", priority=10)
+        async def high_image_handler(msg):
+            results.append("high_image")
+            return msg
+        
+        # 发送 text 消息
+        text_msg = make_message(msg_type="text")
+        await runtime.handle_message(text_msg)
+        
+        # 只有高优先度的 text 处理器被调用
+        assert results == ["high_text"]
+
+    @pytest.mark.asyncio
+    async def test_same_priority_returns_first_non_none_result(self):
+        """测试相同优先度时返回第一个非 None 结果"""
+        runtime = MessageRuntime()
+        
+        async def handler1(msg):
+            return None
+        
+        async def handler2(msg):
+            return {"response": "from handler2"}
+        
+        async def handler3(msg):
+            return {"response": "from handler3"}
+        
+        runtime.add_route(lambda msg: True, handler1, priority=10)
+        runtime.add_route(lambda msg: True, handler2, priority=10)
+        runtime.add_route(lambda msg: True, handler3, priority=10)
+        
+        msg = make_message()
+        result = await runtime.handle_message(msg)
+        
+        # 返回第一个非 None 结果
+        assert result is not None
+        assert "response" in result
+
+    @pytest.mark.asyncio
+    async def test_no_matching_high_priority_falls_to_lower(self):
+        """测试当高优先度不匹配时，低优先度被调用"""
+        runtime = MessageRuntime()
+        
+        results = []
+        
+        # 高优先度但不匹配 text 类型
+        @runtime.on_message(message_type="image", priority=10)
+        async def high_image_handler(msg):
+            results.append("high_image")
+            return msg
+        
+        # 低优先度但匹配 text 类型
+        @runtime.on_message(message_type="text", priority=1)
+        async def low_text_handler(msg):
+            results.append("low_text")
+            return msg
+        
+        msg = make_message(msg_type="text")
+        await runtime.handle_message(msg)
+        
+        # 高优先度不匹配，低优先度被调用
+        assert results == ["low_text"]
+
+    @pytest.mark.asyncio
+    async def test_default_priority_is_zero(self):
+        """测试默认优先度为 0"""
+        runtime = MessageRuntime()
+        
+        async def handler(msg):
+            return msg
+        
+        runtime.add_route(lambda msg: True, handler)
+        
+        assert runtime._routes[0].priority == 0

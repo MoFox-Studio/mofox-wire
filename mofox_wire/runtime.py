@@ -10,6 +10,9 @@ from typing import Awaitable, Callable, Dict, Iterable, List, Protocol
 
 from .types import MessageEnvelope
 
+# 默认优先度
+DEFAULT_PRIORITY = 0
+
 Hook = Callable[[MessageEnvelope], Awaitable[None] | None]
 ErrorHook = Callable[[MessageEnvelope, BaseException], Awaitable[None] | None]
 Predicate = Callable[[MessageEnvelope], bool | Awaitable[bool]]
@@ -41,6 +44,7 @@ class MessageRoute:
     message_type: str | None = None
     message_types: set[str] | None = None  # 支持多个消息类型
     event_types: set[str] | None = None
+    priority: int = DEFAULT_PRIORITY  # 优先度，数值越大优先级越高
 
 
 class MessageRuntime:
@@ -58,8 +62,6 @@ class MessageRuntime:
         self._middlewares: list[Middleware] = []
         self._type_routes: Dict[str, list[MessageRoute]] = {}
         self._event_routes: Dict[str, list[MessageRoute]] = {}
-        # 用于检测同一类型的重复注册
-        self._explicit_type_handlers: Dict[str, str] = {}  # message_type -> handler_name
 
     def add_route(
         self,
@@ -69,6 +71,7 @@ class MessageRuntime:
         *,
         message_type: str | list[str] | None = None,
         event_types: Iterable[str] | None = None,
+        priority: int = DEFAULT_PRIORITY,
     ) -> None:
         """
         添加消息路由
@@ -79,6 +82,9 @@ class MessageRuntime:
             name: 路由名称（可选）
             message_type: 消息类型，可以是字符串或字符串列表（可选）
             event_types: 事件类型列表（可选）
+            priority: 优先度，数值越大优先级越高。默认为 0。
+                     消息只会被路由到最高优先度的处理器。
+                     相同优先度的处理器会同时收到消息。
         """
         with self._lock:
             # 处理 message_type 参数，支持字符串或列表
@@ -95,17 +101,6 @@ class MessageRuntime:
                         single_message_type = next(iter(message_types_set))
                 else:
                     raise TypeError(f"message_type must be str or list[str], got {type(message_type)}")
-                
-                # 检测重复注册：如果明确指定了某个类型，不允许重复
-                handler_name = name or getattr(handler, "__name__", str(handler))
-                for msg_type in message_types_set:
-                    if msg_type in self._explicit_type_handlers:
-                        existing_handler = self._explicit_type_handlers[msg_type]
-                        raise ValueError(
-                            f"消息类型 '{msg_type}' 已被处理器 '{existing_handler}' 明确注册，"
-                            f"不能再由 '{handler_name}' 注册。同一消息类型只能有一个明确的处理器。"
-                        )
-                    self._explicit_type_handlers[msg_type] = handler_name
             
             route = MessageRoute(
                 predicate=predicate,
@@ -114,8 +109,11 @@ class MessageRuntime:
                 message_type=single_message_type,
                 message_types=message_types_set,
                 event_types=set(event_types) if event_types is not None else None,
+                priority=priority,
             )
             self._routes.append(route)
+            # 按优先度降序排序
+            self._routes.sort(key=lambda r: r.priority, reverse=True)
             
             # 为每个消息类型建立索引
             if message_types_set:
@@ -126,10 +124,21 @@ class MessageRuntime:
                 for et in route.event_types:
                     self._event_routes.setdefault(et, []).append(route)
 
-    def route(self, predicate: Predicate, name: str | None = None) -> Callable[[MessageHandler], MessageHandler]:
+    def route(
+        self,
+        predicate: Predicate,
+        name: str | None = None,
+        *,
+        priority: int = DEFAULT_PRIORITY,
+    ) -> Callable[[MessageHandler], MessageHandler]:
         """装饰器写法，便于在核心逻辑中声明式注册。
         
         支持普通函数和类方法。对于类方法，会在实例创建时自动绑定并注册路由。
+        
+        Args:
+            predicate: 路由匹配条件
+            name: 路由名称（可选）
+            priority: 优先度，数值越大优先级越高。默认为 0。
         """
 
         def decorator(func: MessageHandler) -> MessageHandler:
@@ -141,9 +150,10 @@ class MessageRuntime:
                     predicate=predicate,
                     name=name,
                     message_type=None,
+                    priority=priority,
                 )
             
-            self.add_route(predicate, func, name=name)
+            self.add_route(predicate, func, name=name, priority=priority)
             return func
 
         return decorator
@@ -156,6 +166,7 @@ class MessageRuntime:
         platform: str | None = None,
         predicate: Predicate | None = None,
         name: str | None = None,
+        priority: int = DEFAULT_PRIORITY,
     ) -> Callable[[MessageHandler], MessageHandler] | MessageHandler:
         """Sugar decorator with optional Seg.type/platform predicate matching.
 
@@ -165,6 +176,9 @@ class MessageRuntime:
             platform: 平台名称
             predicate: 自定义匹配条件
             name: 路由名称
+            priority: 优先度，数值越大优先级越高。默认为 0。
+                     消息只会被路由到最高优先度的处理器。
+                     相同优先度的处理器会同时收到消息。
 
         Usages:
         - @runtime.on_message(...)
@@ -209,9 +223,10 @@ class MessageRuntime:
                     predicate=combined_predicate,
                     name=name,
                     message_type=message_type,
+                    priority=priority,
                 )
 
-            self.add_route(combined_predicate, func, name=name, message_type=message_type)
+            self.add_route(combined_predicate, func, name=name, message_type=message_type, priority=priority)
             return func
 
         if func is not None:
@@ -240,11 +255,29 @@ class MessageRuntime:
     async def handle_message(self, message: MessageEnvelope) -> MessageEnvelope | None:
         await self._run_hooks(self._before_hooks, message)
         try:
-            route = await self._match_route(message)
-            if route is None:
+            routes = await self._match_routes_by_priority(message)
+            if not routes:
                 return None
-            handler = self._wrap_with_middlewares(route.handler)
-            result = await handler(message)
+            
+            # 并发执行所有最高优先度的处理器
+            if len(routes) == 1:
+                handler = self._wrap_with_middlewares(routes[0].handler)
+                result = await handler(message)
+            else:
+                # 多个相同优先度的处理器并发执行
+                tasks = []
+                for route in routes:
+                    handler = self._wrap_with_middlewares(route.handler)
+                    tasks.append(handler(message))
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                # 返回第一个非异常、非 None 的结果
+                result = None
+                for r in results:
+                    if isinstance(r, Exception):
+                        continue
+                    if r is not None:
+                        result = r
+                        break
         except Exception as exc:
             await self._run_error_hooks(message, exc)
             raise MessageProcessingError(message, exc) from exc
@@ -265,8 +298,12 @@ class MessageRuntime:
                 responses.append(response)
         return responses
 
-    async def _match_route(self, message: MessageEnvelope) -> MessageRoute | None:
-        """匹配消息路由，优先匹配明确指定了消息类型的处理器"""
+    async def _match_routes_by_priority(self, message: MessageEnvelope) -> List[MessageRoute]:
+        """匹配消息路由，返回所有最高优先度的匹配路由
+        
+        消息只会被路由到最高优先度的处理器。
+        相同优先度的处理器会同时收到消息。
+        """
         message_type = _extract_segment_type(message)
         event_type = (
             message.get("event_type")
@@ -275,47 +312,46 @@ class MessageRuntime:
             .get("event_type")
         )
         
-        # 分为两层候选：优先级和普通
-        priority_candidates: list[MessageRoute] = []  # 明确指定了消息类型的
-        normal_candidates: list[MessageRoute] = []    # 没有指定或通配的
+        # 收集所有匹配的路由
+        matched_routes: List[MessageRoute] = []
         
         with self._lock:
-            # 事件路由（优先级最高）
+            # 事件路由
             if event_type and event_type in self._event_routes:
-                priority_candidates.extend(self._event_routes[event_type])
+                for route in self._event_routes[event_type]:
+                    should_handle = await _invoke_callable(route.predicate, message, prefer_thread=False)
+                    if should_handle:
+                        matched_routes.append(route)
             
-            # 消息类型路由（明确指定的有优先级）
+            # 消息类型路由
             if message_type and message_type in self._type_routes:
-                priority_candidates.extend(self._type_routes[message_type])
+                for route in self._type_routes[message_type]:
+                    if route not in matched_routes:
+                        should_handle = await _invoke_callable(route.predicate, message, prefer_thread=False)
+                        if should_handle:
+                            matched_routes.append(route)
             
             # 通用路由（没有明确指定类型的）
             for route in self._routes:
-                # 如果路由没有指定 message_types，则是通用路由
                 if route.message_types is None and route.event_types is None:
-                    normal_candidates.append(route)
+                    if route not in matched_routes:
+                        should_handle = await _invoke_callable(route.predicate, message, prefer_thread=False)
+                        if should_handle:
+                            matched_routes.append(route)
+        
+        if not matched_routes:
+            return []
+        
+        # 找出最高优先度
+        highest_priority = max(r.priority for r in matched_routes)
+        
+        # 返回所有最高优先度的路由
+        return [r for r in matched_routes if r.priority == highest_priority]
 
-        # 先尝试优先级候选
-        seen: set[int] = set()
-        for route in priority_candidates:
-            rid = id(route)
-            if rid in seen:
-                continue
-            seen.add(rid)
-            should_handle = await _invoke_callable(route.predicate, message, prefer_thread=False)
-            if should_handle:
-                return route
-        
-        # 如果没有匹配到优先级候选，再尝试普通候选
-        for route in normal_candidates:
-            rid = id(route)
-            if rid in seen:
-                continue
-            seen.add(rid)
-            should_handle = await _invoke_callable(route.predicate, message, prefer_thread=False)
-            if should_handle:
-                return route
-        
-        return None
+    async def _match_route(self, message: MessageEnvelope) -> MessageRoute | None:
+        """匹配消息路由，返回第一个最高优先度的匹配路由（兼容旧接口）"""
+        routes = await self._match_routes_by_priority(message)
+        return routes[0] if routes else None
 
     async def _run_hooks(self, hooks: Iterable[Hook], message: MessageEnvelope) -> None:
         coro_list = [self._call_hook(hook, message) for hook in hooks]
@@ -417,12 +453,14 @@ class _InstanceMethodRoute:
         predicate: Predicate,
         name: str | None,
         message_type: str | None,
+        priority: int = DEFAULT_PRIORITY,
     ) -> None:
         self._runtime = runtime
         self._func = func
         self._predicate = predicate
         self._name = name
         self._message_type = message_type
+        self._priority = priority
         self._owner: type | None = None
         self._registered_instances: weakref.WeakSet[object] = weakref.WeakSet()
 
@@ -448,7 +486,13 @@ class _InstanceMethodRoute:
             return
         owner = self._owner or instance.__class__
         bound = self._func.__get__(instance, owner)  # type: ignore[arg-type]
-        self._runtime.add_route(self._predicate, bound, name=self._name, message_type=self._message_type)
+        self._runtime.add_route(
+            self._predicate,
+            bound,
+            name=self._name,
+            message_type=self._message_type,
+            priority=self._priority,
+        )
         self._registered_instances.add(instance)
 
     def __get__(self, instance: object | None, owner: type | None = None):
@@ -460,6 +504,7 @@ class _InstanceMethodRoute:
 
 __all__ = [
     "BatchHandler",
+    "DEFAULT_PRIORITY",
     "Hook",
     "MessageHandler",
     "MessageProcessingError",
