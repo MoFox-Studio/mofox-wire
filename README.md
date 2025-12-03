@@ -4,7 +4,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/mofox-wire.svg)](https://pypi.org/project/mofox-wire/)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://opensource.org/licenses/GPL-3.0)
 
-MoFox Wire is a lightweight, high-performance messaging wire designed for MoFox Bot and similar chatbot applications. It provides a robust foundation for building message-driven systems with support for typed message envelopes, flexible routing, and multiple transport protocols.
+MoFox Wire is a lightweight, high-performance messaging wire designed for MoFox Bot and similar chatbot applications. It provides a rowiret foundation for building message-driven systems with support for typed message envelopes, flexible routing, and multiple transport protocols.
 
 ## ✨ Features
 
@@ -49,7 +49,7 @@ pip install -e ".[dev]"
 
 ## 🏗️ Architecture
 
-MoFox Bus follows a layered architecture:
+MoFox Wire follows a layered architecture:
 
 ```
 ┌─────────────────┐
@@ -77,7 +77,7 @@ MoFox Bus follows a layered architecture:
 
 ```python
 import asyncio
-from mofox_bus import MessageRuntime, MessageBuilder, MessageEnvelope
+from mofox_wire import MessageRuntime, MessageBuilder, MessageEnvelope
 
 async def handle_message(envelope: MessageEnvelope) -> MessageEnvelope | None:
     """Simple message handler that processes incoming messages"""
@@ -112,7 +112,7 @@ if __name__ == '__main__':
 ### HTTP Server Example
 
 ```python
-from mofox_bus import MessageServer
+from mofox_wire import MessageServer
 import uvicorn
 
 async def main():
@@ -134,8 +134,8 @@ if __name__ == '__main__':
 ### WebSocket Client Example
 
 ```python
-from mofox_bus.transport import WebSocketClient
-from mofox_bus import MessageBuilder
+from mofox_wire.transport import WebSocketClient
+from mofox_wire import MessageBuilder
 
 async def main():
     # Create WebSocket client
@@ -209,7 +209,7 @@ await router.route(envelope)
 
 ### Message Types
 
-MoFox Bus provides several built-in message types:
+MoFox Wire provides several built-in message types:
 
 - **Text Messages**: Standard text content
 - **Image Messages**: Image URLs and metadata
@@ -251,16 +251,16 @@ await ws_client.send_message(envelope)
 
 ```bash
 # Default settings
-MOFOX_BUS_HOST=0.0.0.0
-MOFOX_BUS_PORT=8000
-MOFOX_BUS_LOG_LEVEL=INFO
-MOFOX_BUS_MAX_CONNECTIONS=1000
+mofox_wire_HOST=0.0.0.0
+mofox_wire_PORT=8000
+mofox_wire_LOG_LEVEL=INFO
+mofox_wire_MAX_CONNECTIONS=1000
 ```
 
 ### Programmatic Configuration
 
 ```python
-from mofox_bus import MessageRuntime
+from mofox_wire import MessageRuntime
 
 runtime = MessageRuntime(
     max_workers=10,
@@ -281,21 +281,21 @@ pip install -e ".[dev]"
 pytest
 
 # Run tests with coverage
-pytest --cov=mofox_bus
+pytest --cov=mofox_wire
 
 # Run type checking
-mypy mofox_bus
+mypy mofox_wire
 ```
 
 ### Code Formatting
 
 ```bash
 # Format code
-black mofox_bus
-isort mofox_bus
+black mofox_wire
+isort mofox_wire
 
 # Lint code
-ruff check mofox_bus
+ruff check mofox_wire
 ```
 
 ### Building Documentation
@@ -313,7 +313,7 @@ mkdocs build
 ### [0.1.0] - 2024-XX-XX
 
 #### Added
-- Initial release of MoFox Bus
+- Initial release of MoFox Wire
 - Core message runtime with middleware support
 - HTTP and WebSocket transport implementations
 - Typed message models with TypedDict
@@ -359,4 +359,4 @@ This project is licensed under the GPL-3.0 License. See the [LICENSE](LICENSE) f
 
 ---
 
-**MoFox Bus** - Building the future of messaging infrastructure, one message at a time. 🚀
+**MoFox Wire** - Building the future of messaging infrastructure, one message at a time. 🚀

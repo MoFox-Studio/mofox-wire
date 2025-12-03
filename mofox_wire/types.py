@@ -61,7 +61,7 @@ class MessageInfoPayload(TypedDict, total=False):
 
 class MessageEnvelope(TypedDict, total=False):
     """
-    mofox-bus 传输层统一使用的消息信封。
+    mofox-wire 传输层统一使用的消息信封。
 
     - 采用 maim_message 风格：message_info + message_segment。
     """

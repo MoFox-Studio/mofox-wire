@@ -16,6 +16,8 @@ MessagePayload = Dict[str, Any]
 MessageHandler = Callable[[MessagePayload], Awaitable[None] | None]
 DisconnectCallback = Callable[[str, str], Awaitable[None] | None]
 
+DEFAULT_WS_MAX_MSG_SIZE = 32 * 1024 * 1024  # 32MB，避免大消息导致连接被切断
+
 
 def _attach_raw_bytes(payload: Any, raw_bytes: bytes) -> Any:
     """
@@ -70,6 +72,20 @@ class BaseMessageHandler:
         self.message_handlers: list[MessageHandler] = []
         self.background_tasks: set[asyncio.Task] = set()
 
+    async def _run_handler(self, handler: MessageHandler, message: MessagePayload) -> None:
+        """安全执行处理器，避免同步阻塞拖垮事件循环。"""
+        try:
+            if asyncio.iscoroutinefunction(handler):
+                await handler(message)
+                return
+            result = await asyncio.to_thread(handler, message)
+            if asyncio.iscoroutine(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - logging only
+            logging.getLogger("mofox_wire.server").exception("消息处理失败")
+
     def register_message_handler(self, handler: MessageHandler) -> None:
         """
         注册消息处理器
@@ -89,15 +105,10 @@ class BaseMessageHandler:
         """
         tasks: list[asyncio.Task] = []
         for handler in self.message_handlers:
-            try:
-                result = handler(message)
-                if asyncio.iscoroutine(result):
-                    task = asyncio.create_task(result)
-                    tasks.append(task)
-                    self.background_tasks.add(task)
-                    task.add_done_callback(self.background_tasks.discard)
-            except Exception:  # pragma: no cover - logging only
-                logging.getLogger("mofox_bus.server").exception("消息处理失败")
+            task = asyncio.create_task(self._run_handler(handler, message))
+            tasks.append(task)
+            self.background_tasks.add(task)
+            task.add_done_callback(self.background_tasks.discard)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -125,9 +136,9 @@ class MessageServer(BaseMessageHandler):
     ) -> None:
         super().__init__()
         if mode != "ws":
-            raise NotImplementedError("Only WebSocket mode is supported in mofox_bus")
+            raise NotImplementedError("Only WebSocket mode is supported in mofox_wire")
         if custom_logger:
-            logging.getLogger("mofox_bus.server").handlers = custom_logger.handlers
+            logging.getLogger("mofox_wire.server").handlers = custom_logger.handlers
         self.host = host
         self.port = port
         self._app = app or FastAPI()
@@ -170,7 +181,7 @@ class MessageServer(BaseMessageHandler):
                         try:
                             payload = orjson.loads(raw_bytes)
                         except orjson.JSONDecodeError:
-                            logging.getLogger("mofox_bus.server").warning("Invalid JSON payload")
+                            logging.getLogger("mofox_wire.server").warning("Invalid JSON payload")
                             continue
                         payload = _attach_raw_bytes(payload, raw_bytes)
                         if isinstance(payload, list):
@@ -191,7 +202,7 @@ class MessageServer(BaseMessageHandler):
         try:
             self._message_queue.put_nowait(payload)
         except asyncio.QueueFull:
-            logging.getLogger("mofox_bus.server").warning("Message queue full, dropping message")
+            logging.getLogger("mofox_wire.server").warning("Message queue full, dropping message")
 
     def _start_workers(self) -> None:
         if self._worker_tasks:
@@ -224,7 +235,7 @@ class MessageServer(BaseMessageHandler):
             try:
                 await self.process_message(payload)
             except Exception:  # pragma: no cover - best effort logging
-                logging.getLogger("mofox_bus.server").exception("Error processing message")
+                logging.getLogger("mofox_wire.server").exception("Error processing message")
             finally:
                 self._message_queue.task_done()
 
@@ -346,10 +357,11 @@ class MessageClient(BaseMessageHandler):
         reconnect_interval: float = 5.0,
         max_reconnect_attempts: int | None = None,
         logger: logging.Logger | None = None,
+        max_msg_size: int | None = DEFAULT_WS_MAX_MSG_SIZE,
     ) -> None:
         super().__init__()
         if mode != "ws":
-            raise NotImplementedError("Only WebSocket mode is supported in mofox_bus")
+            raise NotImplementedError("Only WebSocket mode is supported in mofox_wire")
         self._mode = mode
         self._session: aiohttp.ClientSession | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -363,7 +375,8 @@ class MessageClient(BaseMessageHandler):
         self._reconnect_interval = reconnect_interval
         self._max_reconnect_attempts = max_reconnect_attempts
         self._reconnect_attempts = 0
-        self._logger = logger or logging.getLogger("mofox_bus.client")
+        self._logger = logger or logging.getLogger("mofox_wire.client")
+        self._max_msg_size = max_msg_size
 
     async def connect(
         self,
@@ -393,7 +406,12 @@ class MessageClient(BaseMessageHandler):
         ssl_context = None
         if self._ssl_verify:
             ssl_context = ssl.create_default_context(cafile=self._ssl_verify)
-        self._ws = await self._session.ws_connect(self._url, headers=headers, ssl=ssl_context)
+        self._ws = await self._session.ws_connect(
+            self._url,
+            headers=headers,
+            ssl=ssl_context,
+            max_msg_size=self._max_msg_size,
+        )
         self._receive_task = asyncio.create_task(self._receive_loop())
 
     async def _connect_once(self) -> None:
@@ -408,7 +426,7 @@ class MessageClient(BaseMessageHandler):
                     try:
                         payload = orjson.loads(raw_bytes)
                     except orjson.JSONDecodeError:
-                        logging.getLogger("mofox_bus.client").warning("Invalid JSON payload")
+                        logging.getLogger("mofox_wire.client").warning("Invalid JSON payload")
                         continue
                     payload = _attach_raw_bytes(payload, raw_bytes)
                     if isinstance(payload, list):
@@ -474,7 +492,7 @@ class MessageClient(BaseMessageHandler):
             if asyncio.iscoroutine(result):
                 await result
         except Exception:  # pragma: no cover - best effort notification
-            logging.getLogger("mofox_bus.client").exception("Disconnect callback failed")
+            logging.getLogger("mofox_wire.client").exception("Disconnect callback failed")
 
     async def _reconnect(self) -> None:
         """尝试重连 WebSocket，带有错误处理和重试限制。"""

@@ -36,7 +36,7 @@ class WsMessageClient:
         self._receive_task: asyncio.Task | None = None
         self._closed = False
         self._reconnect_attempts = 0
-        self._logger = logging.getLogger("mofox_bus.ws_client")
+        self._logger = logging.getLogger("mofox_wire.ws_client")
 
     async def connect(self) -> None:
         self._closed = False

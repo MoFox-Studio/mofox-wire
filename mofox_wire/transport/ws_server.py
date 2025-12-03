@@ -25,7 +25,7 @@ class WsMessageServer:
         self._app.add_routes([web.get(path, self._handle_ws)])
         self._connections: Set[web.WebSocketResponse] = set()
         self._lock = asyncio.Lock()
-        self._logger = logging.getLogger("mofox_bus.ws_server")
+        self._logger = logging.getLogger("mofox_wire.ws_server")
 
     async def _handle_ws(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()

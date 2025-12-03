@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mofox-wire"
-version = "0.1.4"
+version = "0.1.5"
 description = "Messaging wire for MoFox Bot with HTTP/WebSocket transports and routing helpers."
 readme = "README.md"
 license = { file = "LICENSE" }

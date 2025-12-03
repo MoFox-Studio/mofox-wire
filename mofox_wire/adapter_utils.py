@@ -16,7 +16,7 @@ from websockets.legacy import server as ws_server
 
 from .types import MessageEnvelope
 
-logger = logging.getLogger("mofox_bus.adapter")
+logger = logging.getLogger("mofox_wire.adapter")
 
 
 OutgoingHandler = Callable[[MessageEnvelope], Awaitable[None]]
@@ -65,6 +65,7 @@ class WebSocketAdapterOptions:
     allowed_paths: list[str] | None = None  # server mode path filter
     reconnect_interval: float = 5.0  # 重连间隔（秒）
     max_reconnect_attempts: int | None = None  # 最大重连次数，None 表示无限重连
+    max_message_size: int | None = 32 * 1024 * 1024  # WebSocket 消息大小上限（字节），None 表示无限制
 
 
 @dataclass
@@ -250,7 +251,11 @@ class AdapterBase:
         """WebSocket connection loop with auto-reconnect."""
         while not self._closed:
             try:
-                self._ws = await ws_client.connect(options.url, extra_headers=options.headers)
+                self._ws = await ws_client.connect(
+                    options.url,
+                    extra_headers=options.headers,
+                    max_size=options.max_message_size,
+                )
                 self._reconnect_attempts = 0
                 logger.info("WebSocket connected to %s", options.url)
                 await self._ws_listen_loop(options)
@@ -302,6 +307,7 @@ class AdapterBase:
             host,
             port,
             extra_headers=options.headers,
+            max_size=options.max_message_size,
         )
 
     async def _ws_listen_loop(self, options: WebSocketAdapterOptions) -> None:

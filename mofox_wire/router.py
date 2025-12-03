@@ -11,7 +11,7 @@ from .api import MessageClient
 from .runtime import DEFAULT_PRIORITY
 from .types import MessageEnvelope
 
-logger = logging.getLogger("mofox_bus.router")
+logger = logging.getLogger("mofox_wire.router")
 
 
 @dataclass
@@ -129,6 +129,20 @@ class Router:
         # 按优先度降序排序，保证高优先度在前
         self.handlers.sort(key=lambda e: e.priority, reverse=True)
 
+    async def _run_handler(self, handler: Callable[[Dict], None], message: Dict) -> None:
+        """在独立任务中运行处理器，避免同步阻塞拖垮事件循环。"""
+        try:
+            if asyncio.iscoroutinefunction(handler):
+                await handler(message)
+                return
+            result = await asyncio.to_thread(handler, message)
+            if asyncio.iscoroutine(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("消息处理失败")
+
     async def _priority_dispatch(self, message: Dict) -> None:
         """
         按优先度分发消息到处理器
@@ -155,13 +169,8 @@ class Router:
         # 并发执行所有最高优先度的处理器
         tasks: list[asyncio.Task] = []
         for handler in top_handlers:
-            try:
-                result = handler(message)
-                if asyncio.iscoroutine(result):
-                    task = asyncio.create_task(result)
-                    tasks.append(task)
-            except Exception:
-                logger.exception("消息处理失败")
+            task = asyncio.create_task(self._run_handler(handler, message))
+            tasks.append(task)
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)

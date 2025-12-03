@@ -25,7 +25,7 @@ class HttpMessageClient:
         self._session = session
         self._timeout = timeout
         self._owns_session = session is None
-        self._logger = logging.getLogger("mofox_bus.http_client")
+        self._logger = logging.getLogger("mofox_wire.http_client")
 
     async def send_messages(
         self,

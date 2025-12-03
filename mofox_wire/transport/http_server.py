@@ -21,7 +21,7 @@ class HttpMessageServer:
         self._app = web.Application()
         self._path = path
         self._app.add_routes([web.post(path, self._handle_messages)])
-        self._logger = logging.getLogger("mofox_bus.http_server")
+        self._logger = logging.getLogger("mofox_wire.http_server")
 
     async def _handle_messages(self, request: web.Request) -> web.Response:
         try:

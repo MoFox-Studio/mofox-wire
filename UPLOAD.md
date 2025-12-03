@@ -1,6 +1,6 @@
 # PyPI Upload Instructions
 
-This document provides instructions for uploading the mofox-bus package to PyPI.
+This document provides instructions for uploading the mofox-wire package to PyPI.
 
 ## Prerequisites
 
@@ -24,7 +24,7 @@ python -m twine upload --repository testpypi dist/*
 
 To test installation from TestPyPI:
 ```bash
-pip install --index-url https://test.pypi.org/simple/ mofox-bus
+pip install --index-url https://test.pypi.org/simple/ mofox-wire
 ```
 
 ### 2. Upload to Production PyPI
@@ -38,7 +38,7 @@ python -m twine upload dist/*
 
 ## Important Notes
 
-- **Version Management**: Update the version in `mofox_bus/__init__.py` before each release
+- **Version Management**: Update the version in `mofox_wire/__init__.py` before each release
 - **Check Changes**: Run `python -m twine check dist/*` to validate packages before upload
 - **Git Tags**: Consider creating a git tag for each release:
   ```bash
@@ -50,23 +50,23 @@ python -m twine upload dist/*
 
 ```
 dist/
-├── mofox_bus-0.1.0-py3-none-any.whl  # Wheel distribution
-└── mofox_bus-0.1.0.tar.gz            # Source distribution
+├── mofox_wire-0.1.0-py3-none-any.whl  # Wheel distribution
+└── mofox_wire-0.1.0.tar.gz            # Source distribution
 ```
 
 ## Post-Upload Verification
 
 After uploading, verify the package:
 
-1. Check the [PyPI page](https://pypi.org/project/mofox-bus/)
+1. Check the [PyPI page](https://pypi.org/project/mofox-wire/)
 2. Test installation:
    ```bash
-   pip install mofox-bus
+   pip install mofox-wire
    ```
 3. Test import:
    ```python
-   import mofox_bus
-   print(f"Version: {mofox_bus.__version__}")
+   import mofox_wire
+   print(f"Version: {mofox_wire.__version__}")
    ```
 
 ## Troubleshooting

@@ -1,10 +1,10 @@
-# MoFox Bus
+# MoFox Wire
 
-[![PyPI version](https://badge.fury.io/py/mofox-bus.svg)](https://badge.fury.io/py/mofox-bus)
-[![Python versions](https://img.shields.io/pypi/pyversions/mofox-bus.svg)](https://pypi.org/project/mofox-bus/)
+[![PyPI version](https://badge.fury.io/py/mofox-wire.svg)](https://badge.fury.io/py/mofox-wire)
+[![Python versions](https://img.shields.io/pypi/pyversions/mofox-wire.svg)](https://pypi.org/project/mofox-wire/)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://opensource.org/licenses/GPL-3.0)
 
-MoFox Bus 是一个轻量级、高性能的消息总线，专为 MoFox Bot 及类似的聊天机器人应用而设计。它为构建消息驱动系统提供了坚实的基础，支持类型化消息信封、灵活的路由机制和多种传输协议。
+MoFox Wire 是一个轻量级、高性能的消息总线，专为 MoFox Bot 及类似的聊天机器人应用而设计。它为构建消息驱动系统提供了坚实的基础，支持类型化消息信封、灵活的路由机制和多种传输协议。
 
 ## ✨ 特性
 
@@ -21,14 +21,14 @@ MoFox Bus 是一个轻量级、高性能的消息总线，专为 MoFox Bot 及�
 从 PyPI 安装（推荐）：
 
 ```bash
-pip install mofox-bus
+pip install mofox-wire
 ```
 
 从源码安装：
 
 ```bash
-git clone https://github.com/mofox-bot/mofox-bus.git
-cd mofox-bus
+git clone https://github.com/mofox-bot/mofox-wire.git
+cd mofox-wire
 pip install -e .
 ```
 
@@ -49,7 +49,7 @@ pip install -e ".[dev]"
 
 ## 🏗️ 架构
 
-MoFox Bus 采用分层架构：
+MoFox Wire 采用分层架构：
 
 ```
 ┌─────────────────┐
@@ -77,7 +77,7 @@ MoFox Bus 采用分层架构：
 
 ```python
 import asyncio
-from mofox_bus import MessageRuntime, MessageBuilder, MessageEnvelope
+from mofox_wire import MessageRuntime, MessageBuilder, MessageEnvelope
 
 async def handle_message(envelope: MessageEnvelope) -> MessageEnvelope | None:
     """处理传入消息的简单消息处理器"""
@@ -112,7 +112,7 @@ if __name__ == '__main__':
 ### HTTP 服务器示例
 
 ```python
-from mofox_bus import MessageServer
+from mofox_wire import MessageServer
 import uvicorn
 
 async def main():
@@ -134,8 +134,8 @@ if __name__ == '__main__':
 ### WebSocket 客户端示例
 
 ```python
-from mofox_bus.transport import WebSocketClient
-from mofox_bus import MessageBuilder
+from mofox_wire.transport import WebSocketClient
+from mofox_wire import MessageBuilder
 
 async def main():
     # 创建 WebSocket 客户端
@@ -209,7 +209,7 @@ await router.route(envelope)
 
 ### 消息类型
 
-MoFox Bus 提供了几种内置的消息类型：
+MoFox Wire 提供了几种内置的消息类型：
 
 - **文本消息**: 标准文本内容
 - **图片消息**: 图片 URL 和元数据
@@ -251,16 +251,16 @@ await ws_client.send_message(envelope)
 
 ```bash
 # 默认设置
-MOFOX_BUS_HOST=0.0.0.0
-MOFOX_BUS_PORT=8000
-MOFOX_BUS_LOG_LEVEL=INFO
-MOFOX_BUS_MAX_CONNECTIONS=1000
+mofox_wire_HOST=0.0.0.0
+mofox_wire_PORT=8000
+mofox_wire_LOG_LEVEL=INFO
+mofox_wire_MAX_CONNECTIONS=1000
 ```
 
 ### 程序化配置
 
 ```python
-from mofox_bus import MessageRuntime
+from mofox_wire import MessageRuntime
 
 runtime = MessageRuntime(
     max_workers=10,
@@ -281,21 +281,21 @@ pip install -e ".[dev]"
 pytest
 
 # 运行带覆盖率的测试
-pytest --cov=mofox_bus
+pytest --cov=mofox_wire
 
 # 运行类型检查
-mypy mofox_bus
+mypy mofox_wire
 ```
 
 ### 代码格式化
 
 ```bash
 # 格式化代码
-black mofox_bus
-isort mofox_bus
+black mofox_wire
+isort mofox_wire
 
 # 检查代码
-ruff check mofox_bus
+ruff check mofox_wire
 ```
 
 ### 构建文档
@@ -313,7 +313,7 @@ mkdocs build
 ### [0.1.0] - 2024-XX-XX
 
 #### 新增
-- MoFox Bus 初始版本
+- MoFox Wire 初始版本
 - 支持中间件的核心消息运行时
 - HTTP 和 WebSocket 传输实现
 - 基于 TypedDict 的类型化消息模型
@@ -348,9 +348,9 @@ mkdocs build
 
 ## 📞 支持
 
-- 📖 [文档](https://github.com/mofox-bot/mofox-bus/wiki)
-- 🐛 [问题跟踪器](https://github.com/mofox-bot/mofox-bus/issues)
-- 💬 [讨论](https://github.com/mofox-bot/mofox-bus/discussions)
+- 📖 [文档](https://github.com/mofox-bot/mofox-wire/wiki)
+- 🐛 [问题跟踪器](https://github.com/mofox-bot/mofox-wire/issues)
+- 💬 [讨论](https://github.com/mofox-bot/mofox-wire/discussions)
 
 ## 🔗 相关项目
 
@@ -359,4 +359,4 @@ mkdocs build
 
 ---
 
-**MoFox Bus** - 一次一条消息，构建消息基础设施的未来。🚀
+**MoFox Wire** - 一次一条消息，构建消息基础设施的未来。🚀
